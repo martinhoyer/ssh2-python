@@ -1,0 +1,25 @@
+[tool.cibuildwheel]
+test-command = "python -c 'from ssh2.session import Session; Session()'"
+build-frontend = "build"
+
+[tool.cibuildwheel.macos]
+before-all = "brew install cmake libssh2"
+skip = ["cp36-*", "cp37-*", "cp38-*"]
+
+[tool.cibuildwheel.linux]
+manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
+manylinux-s390x-image = "manylinux_2_28"
+manylinux-ppc64le-image = "manylinux_2_28"
+
+#before-all = "dnf install -y openssl-devel libffi-devel zlib-devel libgcrypt-devel"
+before-all = "dnf install -y openssl-devel libffi-devel zlib-devel libgcrypt-devel gcc cmake python3-devel"
+#container-engine = "podman"
+#skip = ["pp*", "cp37-*"]
+build = "cp39-manylinux*"
+#archs = "x86_64, s390x, ppc64le"
+repair-wheel-command = "auditwheel repair --lib-sdir . -w {dest_dir} {wheel}"
+
+[[tool.cibuildwheel.overrides]]
+select = "*-musllinux*"
+before-all = "apk add openssl-dev libffi-dev zlib-dev libgcrypt-dev"

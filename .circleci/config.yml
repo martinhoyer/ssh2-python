@@ -13,162 +13,72 @@
 # You should have received a copy of the GNU Lesser General Public
 # License along with this library; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
-version: 2.1
-
-orbs:
-  python: circleci/python@0.3.2
+version: 2
 
 jobs:
-  python_test:
-    parameters:
-      python_ver:
-        type: string
-        default: "3.6"
+  linux-wheels:
+    working_directory: ~/linux-wheels
     docker:
-      - image: circleci/python:<< parameters.python_ver >>
+      - image: cimg/python:3.9
+    environment:
+      CIBW_ARCHS_LINUX: "s390x ppc64le"
     steps:
       - checkout
-      - python/load-cache:
-          dependency-file: requirements_dev.txt
-          key: depsv3-{{ .Branch }}.{{ arch }}-PY<< parameters.python_ver >>
+      - setup_remote_docker
       - run:
-          name: Deps
+          name: Setup QEMU emulators
           command: |
-            sudo apt-get update
-            sudo apt-get install cmake openssh-server
-            pip install -r requirements_dev.txt
-      - python/save-cache:
-          dependency-file: requirements_dev.txt
-          key: depsv3-{{ .Branch }}.{{ arch }}-PY<< parameters.python_ver >>
+            docker run --privileged --rm tonistiigi/binfmt --install ppc64le,s390x
       - run:
+          name: Build the Linux wheels.
           command: |
-            python setup.py build_ext --inplace
-            eval "$(ssh-agent -s)"
-          name: Build
-      - run:
-          command: |
-            set -x
-            ls -lhtr ssh2/
-            pwd
-            pytest tests
-            flake8 ssh2
-            python setup.py sdist
-            cd dist; pip install *; python -c 'from ssh2.session import Session; Session()'; cd ..
-            cd doc
-            make html
-            cd ..
-          name: Test
+            pip3 install --user cibuildwheel==2.12.0
+            cibuildwheel --output-dir wheelhouse
+      - store_artifacts:
+          path: wheelhouse/
 
-  osx:
-    parameters:
-      xcode_ver:
-        type: string
-        default: "11.6.0"
+  linux-aarch64-wheels:
+    working_directory: ~/linux-aarch64-wheels
+    machine:
+      image: ubuntu-2004:2022.04.1
+    resource_class: arm.medium
+    environment:
+      CIBW_ARCHS_LINUX: "s390x ppc64le"
+    steps:
+      - checkout
+      - run:
+          name: Setup QEMU emulators
+          command: |
+            docker run --privileged --rm tonistiigi/binfmt --install ppc64le,s390x
+      - run:
+          name: Build the Linux aarch64 wheels.
+          command: |
+            python3 -m pip install --user cibuildwheel==2.12.0
+            python3 -m cibuildwheel --output-dir wheelhouse
+      - store_artifacts:
+          path: wheelhouse/
+
+  osx-wheels:
+    working_directory: ~/osx-wheels
     macos:
-      xcode: << parameters.xcode_ver >>
+      xcode: 12.5.1
     environment:
       HOMEBREW_NO_AUTO_UPDATE: 1
       SYSTEM_LIBSSH2: 1
     steps:
       - checkout
       - run:
-          name: deps
+          name: Build the OS X wheels.
           command: |
-            brew install cmake git-lfs python libssh2
-            pip3 install twine
-            which twine
-      - run:
-          name: Build Wheel
-          command: |
-            ./ci/osx-wheel.sh
+            pip3 install cibuildwheel==2.12.0
+            cibuildwheel --output-dir wheelhouse
       - store_artifacts:
-          path: wheels
-      - run:
-          name: Upload Wheel
-          command: |
-            twine upload --skip-existing -u $PYPI_USER -p $PYPI_PASSWORD wheels/*
-
-  manylinux-x86_64:
-    machine:
-      image: ubuntu-2004:202201-02
-    steps: &manylinux-steps
-      - checkout
-      - python/load-cache:
-          key: manylinuxdepsv6-{{ .Branch }}.{{ arch }}
-          dependency-file: requirements_dev.txt
-      - run:
-          name: Git LFS
-          command: |
-            curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
-            sudo apt-get install git-lfs
-            git lfs install
-            git lfs pull
-      - run:
-          name: Deps
-          command: |
-            sudo apt-get install python3-pip
-            pip install -U pip
-            pip install twine
-            which twine
-            which python
-            which python3
-      - python/save-cache:
-          key: manylinuxdepsv6-{{ .Branch }}.{{ arch }}
-          dependency-file: requirements_dev.txt
-      - run:
-          name: Build Wheels
-          command: |
-            if [[ -z "${CIRCLE_PULL_REQUEST}" ]]; then
-              echo "$DOCKER_PASSWORD" | docker login -u="$DOCKER_USERNAME" --password-stdin;
-            fi
-            ./ci/build-manylinux.sh
-      - run:
-          name: sdist
-          command: |
-            sudo chown circleci -R *
-            python3 setup.py sdist
-      - run:
-          name: Upload Wheels
-          command: |
-            twine upload --skip-existing -u $PYPI_USER -p $PYPI_PASSWORD dist/* wheelhouse/*
-
-  manylinux2014-aarch64:
-    machine:
-      image: ubuntu-2004:202101-01
-    resource_class: arm.medium
-    steps: *manylinux-steps
+          path: wheelhouse/
 
 workflows:
-  version: 2.1
-  main:
+  version: 2
+  all-tests:
     jobs:
-      - python_test:
-          matrix:
-            parameters:
-              python_ver:
-                - "3.6"
-                - "3.8"
-                - "3.9"
-                - "3.10"
-          filters:
-            tags:
-              ignore: /.*/
-      - manylinux-x86_64: &manylinux-wf
-          context: Docker
-          filters:
-            tags:
-              only: /.*/
-            branches:
-              ignore: /.*/
-      - manylinux2014-aarch64: *manylinux-wf
-      - osx:
-          matrix:
-            parameters:
-              xcode_ver:
-                - "14.0.0"
-                - "13.1.0"
-          filters:
-            tags:
-              only: /.*/
-            branches:
-              ignore: /.*/
+      #- linux-wheels
+      - linux-aarch64-wheels
+      #- osx-wheels
